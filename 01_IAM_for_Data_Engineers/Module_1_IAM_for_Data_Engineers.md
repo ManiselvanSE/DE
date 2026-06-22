@@ -468,7 +468,7 @@ Multi-Factor Authentication (MFA) requires two forms of identification:
 
 #### **Intermediate Questions**
 
-**Q1: Explain the difference between AWS Managed Policies and Customer Managed Policies.**
+**Q6: Explain the difference between AWS Managed Policies and Customer Managed Policies.**
 
 **Answer:**
 
@@ -492,7 +492,7 @@ Multi-Factor Authentication (MFA) requires two forms of identification:
 
 ---
 
-**Q2: What are IAM Roles and when should you use them instead of IAM Users?**
+**Q7: What are IAM Roles and when should you use them instead of IAM Users?**
 
 **Answer:**
 
@@ -517,7 +517,7 @@ Multi-Factor Authentication (MFA) requires two forms of identification:
 
 ---
 
-**Q3: How do you troubleshoot "Access Denied" errors in AWS?**
+**Q8: How do you troubleshoot "Access Denied" errors in AWS?**
 
 **Answer:**
 
@@ -555,7 +555,7 @@ Multi-Factor Authentication (MFA) requires two forms of identification:
 
 ---
 
-**Q4: Explain IAM permission evaluation logic.**
+**Q9: Explain IAM permission evaluation logic.**
 
 **Answer:**
 
@@ -579,7 +579,7 @@ Multi-Factor Authentication (MFA) requires two forms of identification:
 
 ---
 
-**Q5: How do you implement least privilege for a data engineering pipeline?**
+**Q10: How do you implement least privilege for a data engineering pipeline?**
 
 **Answer:**
 
@@ -634,7 +634,7 @@ Multi-Factor Authentication (MFA) requires two forms of identification:
 
 #### **Scenario-Based Questions**
 
-**Scenario 1: A data engineer needs to access S3 buckets in multiple AWS accounts. How would you design this?**
+**Q11: A data engineer needs to access S3 buckets in multiple AWS accounts. How would you design this?**
 
 **Answer:**
 
@@ -716,7 +716,7 @@ aws s3 ls s3://prod-data/
 
 ---
 
-**Scenario 2: Your Glue ETL job is failing with "Access Denied" when writing to S3. How do you troubleshoot?**
+**Q12: Your Glue ETL job is failing with "Access Denied" when writing to S3. How do you troubleshoot?**
 
 **Answer:**
 
@@ -799,7 +799,7 @@ aws cloudtrail lookup-events \
 
 ---
 
-**Scenario 3: Design IAM structure for a data platform with dev, staging, and prod environments.**
+**Q13: Design IAM structure for a data platform with dev, staging, and prod environments.**
 
 **Answer:**
 
@@ -924,7 +924,7 @@ aws iam create-role \
 
 ---
 
-**Scenario 4: How would you secure access to sensitive PII data in S3 for a GDPR-compliant data lake?**
+**Q14: How would you secure access to sensitive PII data in S3 for a GDPR-compliant data lake?**
 
 **Answer:**
 
@@ -1126,7 +1126,7 @@ aws cloudwatch put-metric-alarm \
 
 ---
 
-**Scenario 5: Your company is migrating from on-premises Oracle databases to AWS. How do you manage IAM for database migration tools (DMS) and data engineers?**
+**Q15: Your company is migrating from on-premises Oracle databases to AWS. How do you manage IAM for database migration tools (DMS) and data engineers?**
 
 **Answer:**
 
@@ -1391,7 +1391,7 @@ aws dms create-endpoint \
 
 ---
 
-**Scenario 6: Implement a data access request workflow where analysts must request time-limited access to production data.**
+**Q16: Implement a data access request workflow where analysts must request time-limited access to production data.**
 
 **Answer:**
 
@@ -1621,7 +1621,7 @@ aws events put-targets \
 
 ---
 
-**Scenario 7: Your organization has multiple teams using the same AWS account. How do you isolate data access between teams?**
+**Q17: Your organization has multiple teams using the same AWS account. How do you isolate data access between teams?**
 
 **Answer:**
 
@@ -1831,7 +1831,7 @@ aws s3 ls s3://data-lake/finance/
 
 ---
 
-**Scenario 8: How do you implement row-level and column-level security for Athena queries on S3 data?**
+**Q18: How do you implement row-level and column-level security for Athena queries on S3 data?**
 
 **Answer:**
 
@@ -2003,7 +2003,7 @@ SELECT * FROM customer_db.customers;
 
 ---
 
-**Scenario 9: Your Glue job failed with "Access Denied" when trying to write Parquet files to S3. The bucket has default encryption enabled. What's wrong?**
+**Q19: Your Glue job failed with "Access Denied" when trying to write Parquet files to S3. The bucket has default encryption enabled. What's wrong?**
 
 **Answer:**
 
@@ -2148,7 +2148,7 @@ aws glue get-job-run \
 
 ---
 
-**Scenario 10: Design IAM strategy for a data engineering team that uses infrastructure-as-code (Terraform/CloudFormation).**
+**Q20: Design IAM strategy for a data engineering team that uses infrastructure-as-code (Terraform/CloudFormation).**
 
 **Answer:**
 
