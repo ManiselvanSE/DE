@@ -1495,7 +1495,9 @@ aws glacier complete-vault-lock \
 
 ## Scenario-Based Interview Questions (10)
 
-### Scenario 1: Design S3 bucket structure for a multi-tenant SaaS platform
+### **Q11: Multi-Tenant SaaS S3 Bucket Design**
+
+**Scenario**: Design S3 bucket structure for a multi-tenant SaaS platform
 
 **Question:**  
 You're building a SaaS analytics platform where customers upload CSV files for analysis. Each customer's data must be isolated (Customer A cannot see Customer B's data). You expect 10,000 customers, each uploading 1-100GB monthly. Design the S3 bucket structure, IAM policies, and cost optimization strategy.
@@ -1672,7 +1674,9 @@ s3.put_object(
 
 ---
 
-### Scenario 2: S3 data consistency during ETL pipeline failures
+### **Q12: S3 Data Consistency During ETL Failures**
+
+**Scenario**: S3 data consistency during ETL pipeline failures
 
 **Question:**  
 Your Glue ETL job reads from `s3://raw/`, processes data, and writes to `s3://curated/`. The job occasionally fails mid-processing. How do you ensure:
@@ -1950,7 +1954,9 @@ print(result)
 
 ---
 
-### Scenario 3: S3 performance optimization for high-throughput ingestion
+### **Q13: S3 Performance Optimization for High-Throughput Ingestion**
+
+**Scenario**: S3 performance optimization for high-throughput ingestion
 
 **Question:**  
 You're ingesting 1 million IoT device messages per second (each message = 1KB JSON). Each device uploads to S3 via API Gateway → Lambda → S3. Current implementation hits rate limits and experiences slow uploads. Optimize this architecture.
@@ -2231,3 +2237,1202 @@ This concludes the detailed scenario-based questions. Would you like me to conti
 
 ---
 
+
+
+### **Q14: Cost Optimization - Reducing S3 Storage Costs by 84%**
+
+**Scenario**: Your data lake stores 2.5 PB (2,555 TB) of data with the following access patterns:
+- **Raw data** (1,200 TB): Accessed daily for 7 days, then rarely accessed
+- **Processed data** (1,000 TB): Accessed weekly for 30 days, then archived
+- **Curated data** (355 TB): Accessed monthly for 90 days, compliance retention 7 years
+
+Current cost: $705,180/year (all S3 Standard). Design a cost-optimized storage strategy.
+
+**Solution:**
+
+**Storage Class Selection:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│           Cost-Optimized Data Lake Architecture            │
+└─────────────────────────────────────────────────────────────┘
+
+Raw Zone (1,200 TB):
+├─ Days 0-7: S3 Standard (hot access)          $27,600/year
+├─ Days 8-90: S3 Standard-IA (warm)            $18,000/year  
+└─ Days 91+: S3 Glacier Instant Retrieval      $5,760/year
+   Total raw zone: $51,360/year
+
+Processed Zone (1,000 TB):
+├─ Days 0-30: S3 Standard                      $23,000/year
+├─ Days 31-365: S3 Standard-IA                 $15,000/year
+└─ Year 2+: S3 Glacier Flexible Retrieval      $4,320/year
+   Total processed zone: $42,320/year
+
+Curated Zone (355 TB):
+├─ Days 0-90: S3 Standard                      $8,165/year
+└─ Days 91-7 years: S3 Glacier Deep Archive    $421/year
+   Total curated zone: $8,586/year
+
+TOTAL OPTIMIZED COST: $102,266/year
+SAVINGS: $602,914/year (85% reduction)
+```
+
+**Lifecycle Policy Implementation:**
+
+```json
+{
+  "Rules": [
+    {
+      "Id": "raw-data-lifecycle",
+      "Prefix": "raw/",
+      "Status": "Enabled",
+      "Transitions": [
+        {
+          "Days": 7,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "Days": 90,
+          "StorageClass": "GLACIER_IR"
+        }
+      ]
+    },
+    {
+      "Id": "processed-data-lifecycle",
+      "Prefix": "processed/",
+      "Status": "Enabled",
+      "Transitions": [
+        {
+          "Days": 30,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "Days": 365,
+          "StorageClass": "GLACIER"
+        }
+      ]
+    },
+    {
+      "Id": "curated-data-lifecycle",
+      "Prefix": "curated/",
+      "Status": "Enabled",
+      "Transitions": [
+        {
+          "Days": 90,
+          "StorageClass": "DEEP_ARCHIVE"
+        }
+      ],
+      "Expiration": {
+        "Days": 2555
+      }
+    },
+    {
+      "Id": "delete-incomplete-multipart",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}
+```
+
+**Apply lifecycle policy:**
+
+```bash
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket my-datalake \
+  --lifecycle-configuration file://lifecycle-policy.json
+```
+
+**Results:**
+
+| Zone | Size | Before | After | Savings |
+|------|------|--------|-------|---------|
+| Raw | 1,200 TB | $276K/yr | $51K/yr | 81% |
+| Processed | 1,000 TB | $230K/yr | $42K/yr | 82% |
+| Curated | 355 TB | $82K/yr | $9K/yr | 89% |
+| **TOTAL** | **2,555 TB** | **$705K/yr** | **$102K/yr** | **85%** |
+
+**Additional Optimizations:**
+
+1. **S3 Intelligent-Tiering** for unknown access patterns (auto-optimizes):
+   ```bash
+   aws s3api put-bucket-intelligent-tiering-configuration \
+     --bucket my-datalake \
+     --id unknown-access-pattern \
+     --intelligent-tiering-configuration '{
+       "Id": "unknown-access-pattern",
+       "Status": "Enabled",
+       "Tierings": [
+         {"Days": 90, "AccessTier": "ARCHIVE_ACCESS"},
+         {"Days": 180, "AccessTier": "DEEP_ARCHIVE_ACCESS"}
+       ]
+     }'
+   ```
+
+2. **Delete incomplete multipart uploads** (saves storage costs):
+   - Configured in lifecycle policy above (7 days)
+
+3. **S3 Storage Lens** for visibility:
+   ```bash
+   aws s3control create-storage-lens-configuration \
+     --account-id 123456789012 \
+     --config-id cost-optimization-lens \
+     --storage-lens-configuration file://lens-config.json
+   ```
+
+---
+
+### **Q15: S3 Security Architecture - 7-Layer Defense**
+
+**Scenario**: Design a comprehensive S3 security architecture for a healthcare data lake storing HIPAA-compliant patient records. Requirements:
+- Encryption at rest and in transit
+- Access logging and monitoring
+- Data cannot be deleted for 7 years (compliance)
+- Only authorized users can access specific patient data
+- Audit trail for all access
+
+**Solution:**
+
+**7-Layer Security Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              HIPAA-Compliant S3 Security Layers            │
+└─────────────────────────────────────────────────────────────┘
+
+Layer 1: Network Isolation
+├─ VPC Endpoints (private access, no internet)
+├─ S3 bucket in private subnet
+└─ Security groups restrict access
+
+Layer 2: Encryption at Rest
+├─ SSE-KMS (AWS managed key)
+├─ Customer Master Key (CMK) per department
+└─ Automatic encryption enforcement
+
+Layer 3: Encryption in Transit
+├─ Enforce HTTPS (deny HTTP)
+├─ TLS 1.2+ required
+└─ Bucket policy denies non-SSL
+
+Layer 4: Access Control
+├─ IAM policies (least privilege)
+├─ Bucket policies (resource-based)
+├─ S3 Access Points (per-application)
+└─ Pre-signed URLs (time-limited)
+
+Layer 5: Immutability
+├─ S3 Object Lock (Compliance mode)
+├─ 7-year retention period
+└─ MFA Delete enabled
+
+Layer 6: Logging & Monitoring
+├─ S3 Server Access Logs
+├─ CloudTrail (data events)
+├─ S3 Event Notifications
+└─ CloudWatch alarms
+
+Layer 7: Data Classification
+├─ S3 Object Tags (PHI, PII)
+├─ Macie (auto-detect sensitive data)
+└─ Lake Formation (column-level access)
+```
+
+**Implementation:**
+
+**Layer 1 & 2: Encryption**
+
+```bash
+# Create KMS key for encryption
+aws kms create-key \
+  --description "HIPAA patient data encryption key" \
+  --key-policy '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "Enable IAM policies",
+      "Effect": "Allow",
+      "Principal": {"AWS": "arn:aws:iam::123456789012:root"},
+      "Action": "kms:*",
+      "Resource": "*"
+    }]
+  }'
+
+# Enable default encryption
+aws s3api put-bucket-encryption \
+  --bucket hipaa-patient-data \
+  --server-side-encryption-configuration '{
+    "Rules": [{
+      "ApplyServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "aws:kms",
+        "KMSMasterKeyID": "arn:aws:kms:us-east-1:123456789012:key/abc-123"
+      },
+      "BucketKeyEnabled": true
+    }]
+  }'
+```
+
+**Layer 3: Enforce HTTPS**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyInsecureTransport",
+    "Effect": "Deny",
+    "Principal": "*",
+    "Action": "s3:*",
+    "Resource": [
+      "arn:aws:s3:::hipaa-patient-data",
+      "arn:aws:s3:::hipaa-patient-data/*"
+    ],
+    "Condition": {
+      "Bool": {
+        "aws:SecureTransport": "false"
+      }
+    }
+  }]
+}
+```
+
+**Layer 4: Least Privilege IAM**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ],
+    "Resource": [
+      "arn:aws:s3:::hipaa-patient-data",
+      "arn:aws:s3:::hipaa-patient-data/cardiology/*"
+    ],
+    "Condition": {
+      "StringEquals": {
+        "s3:ExistingObjectTag/Department": "Cardiology"
+      }
+    }
+  }]
+}
+```
+
+**Layer 5: Object Lock (7-year retention)**
+
+```bash
+# Enable Object Lock at bucket creation
+aws s3api create-bucket \
+  --bucket hipaa-patient-data \
+  --object-lock-enabled-for-bucket
+
+# Set default retention (7 years = 2555 days)
+aws s3api put-object-lock-configuration \
+  --bucket hipaa-patient-data \
+  --object-lock-configuration '{
+    "ObjectLockEnabled": "Enabled",
+    "Rule": {
+      "DefaultRetention": {
+        "Mode": "COMPLIANCE",
+        "Days": 2555
+      }
+    }
+  }'
+
+# Enable MFA Delete
+aws s3api put-bucket-versioning \
+  --bucket hipaa-patient-data \
+  --versioning-configuration Status=Enabled,MFADelete=Enabled \
+  --mfa "arn:aws:iam::123456789012:mfa/root-account-mfa 123456"
+```
+
+**Layer 6: Logging & Monitoring**
+
+```bash
+# Enable S3 access logging
+aws s3api put-bucket-logging \
+  --bucket hipaa-patient-data \
+  --bucket-logging-status '{
+    "LoggingEnabled": {
+      "TargetBucket": "hipaa-access-logs",
+      "TargetPrefix": "patient-data-logs/"
+    }
+  }'
+
+# Enable CloudTrail data events
+aws cloudtrail put-event-selectors \
+  --trail-name hipaa-trail \
+  --event-selectors '[{
+    "ReadWriteType": "All",
+    "IncludeManagementEvents": true,
+    "DataResources": [{
+      "Type": "AWS::S3::Object",
+      "Values": ["arn:aws:s3:::hipaa-patient-data/*"]
+    }]
+  }]'
+
+# CloudWatch alarm for unauthorized access
+aws cloudwatch put-metric-alarm \
+  --alarm-name s3-unauthorized-access \
+  --alarm-description "Alert on S3 access denied events" \
+  --metric-name AccessDenied \
+  --namespace AWS/S3 \
+  --statistic Sum \
+  --period 300 \
+  --threshold 5 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --alarm-actions arn:aws:sns:us-east-1:123456789012:security-alerts
+```
+
+**Results:**
+
+| Security Layer | Implementation | Compliance |
+|----------------|----------------|------------|
+| Network Isolation | VPC Endpoint | ✅ HIPAA |
+| Encryption at Rest | KMS CMK | ✅ HIPAA |
+| Encryption in Transit | TLS 1.2+ | ✅ HIPAA |
+| Access Control | IAM + Bucket Policy | ✅ HIPAA |
+| Immutability | Object Lock Compliance | ✅ HIPAA |
+| Logging | CloudTrail + S3 Logs | ✅ HIPAA |
+| Monitoring | CloudWatch Alarms | ✅ HIPAA |
+
+---
+
+### **Q16: Event-Driven Data Pipeline - S3 → EventBridge → Lambda → Glue**
+
+**Scenario**: Build an event-driven ETL pipeline that automatically processes CSV files uploaded to S3, validates data quality, and loads into Glue Data Catalog for Athena queries.
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│           Event-Driven ETL Pipeline                        │
+└─────────────────────────────────────────────────────────────┘
+
+User uploads CSV → S3 (raw/)
+         ↓
+    S3 Event Notification
+         ↓
+    EventBridge Rule (filter: *.csv)
+         ↓
+    Lambda (validate-data)
+         ├─ Valid: Trigger Glue Crawler
+         └─ Invalid: Send to DLQ (Dead Letter Queue)
+              ↓
+         Glue Crawler
+              ├─ Infer schema
+              ├─ Update Glue Data Catalog
+              └─ Trigger SNS notification
+                   ↓
+              Athena Query Available
+```
+
+**Implementation:**
+
+**Step 1: S3 Bucket with EventBridge**
+
+```bash
+# Create S3 bucket
+aws s3api create-bucket --bucket event-driven-datalake
+
+# Enable EventBridge notifications
+aws s3api put-bucket-notification-configuration \
+  --bucket event-driven-datalake \
+  --notification-configuration '{
+    "EventBridgeConfiguration": {}
+  }'
+```
+
+**Step 2: EventBridge Rule**
+
+```bash
+# Create EventBridge rule (filter for CSV files)
+aws events put-rule \
+  --name s3-csv-upload-rule \
+  --event-pattern '{
+    "source": ["aws.s3"],
+    "detail-type": ["Object Created"],
+    "detail": {
+      "bucket": {"name": ["event-driven-datalake"]},
+      "object": {
+        "key": [{"suffix": ".csv"}]
+      }
+    }
+  }'
+
+# Add Lambda as target
+aws events put-targets \
+  --rule s3-csv-upload-rule \
+  --targets "Id=1,Arn=arn:aws:lambda:us-east-1:123456789012:function:validate-data"
+```
+
+**Step 3: Lambda Validation Function**
+
+```python
+# lambda_function.py
+import boto3
+import csv
+import io
+
+s3 = boto3.client('s3')
+glue = boto3.client('glue')
+sns = boto3.client('sns')
+
+def lambda_handler(event, context):
+    """
+    Validate CSV file and trigger Glue Crawler
+    """
+    
+    # Extract S3 details from EventBridge event
+    bucket = event['detail']['bucket']['name']
+    key = event['detail']['object']['key']
+    
+    print(f"Processing: s3://{bucket}/{key}")
+    
+    try:
+        # Download CSV file
+        response = s3.get_object(Bucket=bucket, Key=key)
+        csv_content = response['Body'].read().decode('utf-8')
+        
+        # Validate CSV structure
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(csv_reader)
+        
+        # Data quality checks
+        if len(rows) == 0:
+            raise ValueError("Empty CSV file")
+        
+        required_columns = ['user_id', 'timestamp', 'event_type']
+        if not all(col in csv_reader.fieldnames for col in required_columns):
+            raise ValueError(f"Missing required columns: {required_columns}")
+        
+        # Validation passed - trigger Glue Crawler
+        glue.start_crawler(Name='csv-data-crawler')
+        
+        # Send success notification
+        sns.publish(
+            TopicArn='arn:aws:sns:us-east-1:123456789012:data-pipeline-alerts',
+            Subject='✅ CSV File Processed Successfully',
+            Message=f'File: s3://{bucket}/{key}\nRows: {len(rows)}\nStatus: VALID'
+        )
+        
+        return {
+            'statusCode': 200,
+            'body': f'Successfully validated {len(rows)} rows'
+        }
+        
+    except Exception as e:
+        # Validation failed - move to DLQ
+        dlq_key = key.replace('raw/', 'dlq/')
+        s3.copy_object(
+            Bucket=bucket,
+            CopySource={'Bucket': bucket, 'Key': key},
+            Key=dlq_key
+        )
+        
+        # Send failure notification
+        sns.publish(
+            TopicArn='arn:aws:sns:us-east-1:123456789012:data-pipeline-alerts',
+            Subject='❌ CSV Validation Failed',
+            Message=f'File: s3://{bucket}/{key}\nError: {str(e)}\nMoved to DLQ: {dlq_key}'
+        )
+        
+        raise
+```
+
+**Step 4: Glue Crawler**
+
+```bash
+# Create Glue Crawler
+aws glue create-crawler \
+  --name csv-data-crawler \
+  --role GlueServiceRole \
+  --database-name analytics_db \
+  --targets '{
+    "S3Targets": [{
+      "Path": "s3://event-driven-datalake/raw/"
+    }]
+  }' \
+  --schema-change-policy '{
+    "UpdateBehavior": "UPDATE_IN_DATABASE",
+    "DeleteBehavior": "DEPRECATE_IN_DATABASE"
+  }'
+```
+
+**Step 5: Query with Athena**
+
+```sql
+-- Data is now queryable via Athena
+SELECT 
+    user_id,
+    event_type,
+    COUNT(*) AS event_count
+FROM analytics_db.raw
+WHERE DATE(timestamp) = CURRENT_DATE
+GROUP BY user_id, event_type
+ORDER BY event_count DESC
+LIMIT 10;
+```
+
+**Results:**
+
+| Metric | Value |
+|--------|-------|
+| **Latency** | 30-60 seconds (upload → queryable) |
+| **Cost** | $0.20 per 1,000 files processed |
+| **Automation** | 100% (no manual intervention) |
+| **Data Quality** | Validated before processing |
+| **Monitoring** | SNS notifications for success/failure |
+
+---
+
+### **Q17: Cross-Region Disaster Recovery with S3 Replication**
+
+**Scenario**: Design a disaster recovery strategy for a critical data lake using S3 Cross-Region Replication (CRR). Requirements: RTO < 1 hour, RPO < 15 minutes, automatic failover.
+
+**Solution:**
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│          S3 Cross-Region Disaster Recovery                 │
+└─────────────────────────────────────────────────────────────┘
+
+Primary Region: us-east-1
+┌──────────────────────────────┐
+│ S3: prod-datalake-us-east-1  │
+│ ├─ Versioning: Enabled       │
+│ ├─ Encryption: KMS           │
+│ ├─ Size: 500 TB              │
+│ └─ Replication: → us-west-2  │
+└──────────────────────────────┘
+         │ S3 CRR (99.99% SLA)
+         │ Replication lag: < 15 min
+         ↓
+Secondary Region: us-west-2 (DR)
+┌──────────────────────────────┐
+│ S3: prod-datalake-us-west-2  │
+│ ├─ Versioning: Enabled       │
+│ ├─ Encryption: KMS           │
+│ ├─ Size: 500 TB (replica)    │
+│ └─ Status: Standby           │
+└──────────────────────────────┘
+         │
+         │ Route 53 Failover
+         ↓
+    Application (reads from DR bucket on failure)
+```
+
+**Implementation:**
+
+**Step 1: Enable Versioning (Required for CRR)**
+
+```bash
+# Primary bucket
+aws s3api put-bucket-versioning \
+  --bucket prod-datalake-us-east-1 \
+  --versioning-configuration Status=Enabled
+
+# DR bucket
+aws s3api put-bucket-versioning \
+  --bucket prod-datalake-us-west-2 \
+  --versioning-configuration Status=Enabled
+```
+
+**Step 2: Create IAM Role for Replication**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Service": "s3.amazonaws.com"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetReplicationConfiguration",
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::prod-datalake-us-east-1"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObjectVersionForReplication",
+        "s3:GetObjectVersionAcl"
+      ],
+      "Resource": "arn:aws:s3:::prod-datalake-us-east-1/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ReplicateObject",
+        "s3:ReplicateDelete"
+      ],
+      "Resource": "arn:aws:s3:::prod-datalake-us-west-2/*"
+    }
+  ]
+}
+```
+
+**Step 3: Configure S3 Replication**
+
+```bash
+aws s3api put-bucket-replication \
+  --bucket prod-datalake-us-east-1 \
+  --replication-configuration '{
+    "Role": "arn:aws:iam::123456789012:role/S3ReplicationRole",
+    "Rules": [{
+      "Status": "Enabled",
+      "Priority": 1,
+      "Filter": {},
+      "Destination": {
+        "Bucket": "arn:aws:s3:::prod-datalake-us-west-2",
+        "ReplicationTime": {
+          "Status": "Enabled",
+          "Time": {
+            "Minutes": 15
+          }
+        },
+        "Metrics": {
+          "Status": "Enabled",
+          "EventThreshold": {
+            "Minutes": 15
+          }
+        }
+      },
+      "DeleteMarkerReplication": {
+        "Status": "Enabled"
+      }
+    }]
+  }'
+```
+
+**Step 4: Monitor Replication**
+
+```bash
+# Check replication status
+aws s3api get-bucket-replication \
+  --bucket prod-datalake-us-east-1
+
+# CloudWatch metrics for replication lag
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/S3 \
+  --metric-name ReplicationLatency \
+  --dimensions Name=SourceBucket,Value=prod-datalake-us-east-1 \
+  --start-time 2024-06-22T00:00:00Z \
+  --end-time 2024-06-22T23:59:59Z \
+  --period 3600 \
+  --statistics Average,Maximum
+
+# Alarm for replication lag > 15 minutes
+aws cloudwatch put-metric-alarm \
+  --alarm-name s3-replication-lag-high \
+  --metric-name ReplicationLatency \
+  --namespace AWS/S3 \
+  --statistic Maximum \
+  --period 900 \
+  --threshold 900000 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --alarm-actions arn:aws:sns:us-east-1:123456789012:dr-alerts
+```
+
+**Step 5: Failover to DR Region**
+
+```python
+# dr_failover.py
+import boto3
+
+route53 = boto3.client('route53')
+sns = boto3.client('sns')
+
+def failover_to_dr():
+    """
+    Failover to DR region (us-west-2)
+    """
+    
+    # Update Route 53 to point to DR bucket
+    route53.change_resource_record_sets(
+        HostedZoneId='Z1234567890',
+        ChangeBatch={
+            'Changes': [{
+                'Action': 'UPSERT',
+                'ResourceRecordSet': {
+                    'Name': 'datalake.company.com',
+                    'Type': 'CNAME',
+                    'TTL': 60,
+                    'ResourceRecords': [{
+                        'Value': 'prod-datalake-us-west-2.s3.us-west-2.amazonaws.com'
+                    }]
+                }
+            }]
+        }
+    )
+    
+    # Notify ops team
+    sns.publish(
+        TopicArn='arn:aws:sns:us-east-1:123456789012:dr-alerts',
+        Subject='🚨 DR FAILOVER INITIATED',
+        Message=f"""
+        Failover to DR region completed.
+        
+        Primary: us-east-1 (FAILED)
+        DR: us-west-2 (ACTIVE)
+        
+        DNS: datalake.company.com → us-west-2
+        RTO: < 1 hour
+        RPO: < 15 minutes
+        
+        Next steps:
+        1. Verify application connectivity
+        2. Investigate us-east-1 failure
+        3. Plan failback when primary restored
+        """
+    )
+    
+    return {'statusCode': 200, 'body': 'Failover complete'}
+```
+
+**Results:**
+
+| Metric | Target | Actual |
+|--------|--------|--------|
+| **RTO** | < 1 hour | 30 minutes |
+| **RPO** | < 15 minutes | 5-10 minutes |
+| **Replication Lag** | < 15 min | 5-10 min (avg) |
+| **Cost** | N/A | $1,000/month (500TB replication) |
+| **Availability** | 99.99% | 99.99% |
+
+---
+
+### **Q18: Data Lake Governance with AWS Lake Formation**
+
+**Scenario**: Implement fine-grained access control for a data lake with 50 tables across 5 departments. Requirements:
+- Row-level security (sales reps see only their region's data)
+- Column-level security (mask PII from analysts)
+- Grant permissions via Lake Formation (not IAM)
+
+**Solution:**
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│          Lake Formation Access Control                     │
+└─────────────────────────────────────────────────────────────┘
+
+Glue Data Catalog:
+├─ Database: sales_db
+│   ├─ Table: customers (10 columns, 5M rows)
+│   │   ├─ Columns: customer_id, name, email, region, revenue
+│   │   └─ Sensitive: email (PII)
+│   └─ Table: orders (8 columns, 50M rows)
+│       └─ Partition: region (US-WEST, US-EAST, EU)
+
+Lake Formation Permissions:
+├─ SalesManager (all regions, all columns)
+├─ SalesRep_USWest (region=US-WEST, email masked)
+├─ Analyst (all regions, email + SSN masked)
+└─ Compliance (all data, read-only)
+```
+
+**Implementation:**
+
+**Step 1: Register S3 Location with Lake Formation**
+
+```bash
+# Register S3 path
+aws lakeformation register-resource \
+  --resource-arn arn:aws:s3:::sales-datalake \
+  --use-service-linked-role
+
+# Grant Lake Formation permissions (revoke IAM permissions)
+aws lakeformation grant-permissions \
+  --principal DataLakePrincipalIdentifier=arn:aws:iam::123456789012:role/LakeFormationAdmin \
+  --permissions ALL \
+  --resource '{
+    "Database": {
+      "Name": "sales_db"
+    }
+  }'
+```
+
+**Step 2: Create Row-Level Security (Data Filter)**
+
+```bash
+# Row filter for US-WEST sales rep
+aws lakeformation create-data-cells-filter \
+  --table-data '{
+    "DatabaseName": "sales_db",
+    "TableName": "orders",
+    "Name": "uswest_filter",
+    "RowFilter": {
+      "FilterExpression": "region = '\''US-WEST'\''"
+    }
+  }'
+```
+
+**Step 3: Create Column-Level Security (Mask PII)**
+
+```bash
+# Grant permissions with column exclusions
+aws lakeformation grant-permissions \
+  --principal DataLakePrincipalIdentifier=arn:aws:iam::123456789012:role/AnalystRole \
+  --permissions SELECT \
+  --resource '{
+    "TableWithColumns": {
+      "DatabaseName": "sales_db",
+      "TableName": "customers",
+      "ColumnWildcard": {
+        "ExcludedColumnNames": ["email", "ssn", "phone"]
+      }
+    }
+  }'
+```
+
+**Step 4: Grant Row + Column Permissions**
+
+```bash
+# Sales rep (US-WEST only, email masked)
+aws lakeformation grant-permissions \
+  --principal DataLakePrincipalIdentifier=arn:aws:iam::123456789012:role/SalesRepUSWest \
+  --permissions SELECT \
+  --resource '{
+    "DataCellsFilter": {
+      "DatabaseName": "sales_db",
+      "TableName": "orders",
+      "Name": "uswest_filter"
+    }
+  }'
+```
+
+**Step 5: Query with Athena**
+
+```sql
+-- Sales manager sees all rows
+SELECT region, COUNT(*) AS order_count, SUM(revenue) AS total_revenue
+FROM sales_db.orders
+GROUP BY region;
+
+-- Result (sales manager):
+-- region    | order_count | total_revenue
+-- US-WEST   | 15M         | $450M
+-- US-EAST   | 20M         | $600M
+-- EU        | 15M         | $400M
+
+-- Sales rep (US-WEST) sees only their region
+SELECT region, COUNT(*) AS order_count
+FROM sales_db.orders
+GROUP BY region;
+
+-- Result (sales rep):
+-- region    | order_count
+-- US-WEST   | 15M
+-- (other regions filtered out by Lake Formation)
+
+-- Analyst cannot see PII columns
+SELECT customer_id, email, revenue
+FROM sales_db.customers
+LIMIT 10;
+
+-- Result (analyst):
+-- customer_id | email        | revenue
+-- C001        | [MASKED]     | $5,000
+-- (email column masked by Lake Formation)
+```
+
+**Results:**
+
+| User Role | Row Access | Column Access | Implementation |
+|-----------|------------|---------------|----------------|
+| SalesManager | All regions | All columns | Lake Formation grant |
+| SalesRep_USWest | US-WEST only | Email masked | Data cells filter |
+| Analyst | All regions | PII masked | Column exclusion |
+| Compliance | All regions | All columns (read-only) | Read-only grant |
+
+**Benefits:**
+- ✅ Centralized access control (no IAM policies per user)
+- ✅ Fine-grained security (row + column level)
+- ✅ Audit trail (CloudTrail logs all access)
+- ✅ Scales to 1000s of users
+
+---
+
+### **Q19: S3 Intelligent-Tiering vs Manual Lifecycle Policies**
+
+**Scenario**: You have a 1 PB data lake with unpredictable access patterns. Some data is accessed frequently for weeks, then rarely for months. Compare S3 Intelligent-Tiering vs manual lifecycle policies for cost optimization.
+
+**Comparison:**
+
+**Option 1: S3 Intelligent-Tiering (Recommended)**
+
+```
+How it works:
+├─ Monitors access patterns automatically
+├─ Moves objects between tiers based on access
+├─ No retrieval fees for Frequent/Infrequent tiers
+└─ No lifecycle policies needed
+
+Tiers:
+├─ Frequent Access (< 30 days since last access)
+├─ Infrequent Access (30-90 days)
+├─ Archive Instant Access (90-180 days)
+├─ Archive Access (180-365 days)
+└─ Deep Archive Access (365+ days)
+```
+
+**Setup:**
+
+```bash
+# Enable Intelligent-Tiering on entire bucket
+aws s3api put-bucket-intelligent-tiering-configuration \
+  --bucket my-datalake \
+  --id intelligent-tiering-config \
+  --intelligent-tiering-configuration '{
+    "Id": "intelligent-tiering-config",
+    "Status": "Enabled",
+    "Tierings": [
+      {
+        "Days": 90,
+        "AccessTier": "ARCHIVE_ACCESS"
+      },
+      {
+        "Days": 180,
+        "AccessTier": "DEEP_ARCHIVE_ACCESS"
+      }
+    ]
+  }'
+```
+
+**Cost (1 PB with 20% frequent, 50% infrequent, 30% archive):**
+
+| Tier | Size | Cost/GB/Month | Total/Month |
+|------|------|---------------|-------------|
+| Frequent Access (20%) | 200 TB | $0.023 | $4,600 |
+| Infrequent Access (50%) | 500 TB | $0.0125 | $6,250 |
+| Archive Access (30%) | 300 TB | $0.004 | $1,200 |
+| Monitoring fee | 1 PB | $0.0025 | $2,500 |
+| **TOTAL** | **1 PB** | - | **$14,550/month** |
+
+---
+
+**Option 2: Manual Lifecycle Policies**
+
+```json
+{
+  "Rules": [{
+    "Id": "transition-to-ia",
+    "Status": "Enabled",
+    "Transitions": [
+      {"Days": 30, "StorageClass": "STANDARD_IA"},
+      {"Days": 90, "StorageClass": "GLACIER_IR"},
+      {"Days": 365, "StorageClass": "GLACIER"}
+    ]
+  }]
+}
+```
+
+**Cost (same 1 PB, but FIXED transition schedule):**
+
+| Tier | Size | Cost/GB/Month | Total/Month |
+|------|------|---------------|-------------|
+| Standard (0-30 days) | 100 TB | $0.023 | $2,300 |
+| Standard-IA (30-90 days) | 200 TB | $0.0125 | $2,500 |
+| Glacier IR (90-365 days) | 400 TB | $0.004 | $1,600 |
+| Glacier (365+ days) | 300 TB | $0.0036 | $1,080 |
+| **TOTAL** | **1 PB** | - | **$7,480/month** |
+
+**BUT: Retrieval costs for unpredictable access:**
+- Standard-IA: $0.01/GB retrieval
+- Glacier IR: $0.03/GB retrieval
+- If you retrieve 100 TB/month: +$1,000 to $3,000
+
+**Total with retrievals: $10,480/month**
+
+---
+
+**Comparison:**
+
+| Metric | Intelligent-Tiering | Manual Lifecycle |
+|--------|---------------------|------------------|
+| **Monthly Cost** | $14,550 | $7,480 + retrieval |
+| **Retrieval Fees** | $0 (Frequent/Infrequent) | $1,000-$3,000/month |
+| **Complexity** | Low (automatic) | High (tune policies) |
+| **Flexibility** | Adapts to changes | Fixed schedule |
+| **Best For** | Unknown patterns | Predictable patterns |
+
+**Recommendation:**
+- **Use Intelligent-Tiering** if access patterns are unpredictable
+- **Use Manual Lifecycle** if access patterns are well-known and stable
+
+---
+
+### **Q20: Optimizing Large File Uploads - Multipart Upload & Transfer Acceleration**
+
+**Scenario**: You need to upload 5 TB of daily logs (10,000 files, 500 MB each) from on-premises to S3. Upload via standard PUT is slow (12 hours) and frequently fails. Optimize for speed and reliability.
+
+**Solution:**
+
+**Option 1: Multipart Upload (Recommended for Large Files)**
+
+**How it works:**
+```
+Large file (500 MB) split into parts (5 MB each):
+├─ Part 1 (5 MB) → Upload in parallel
+├─ Part 2 (5 MB) → Upload in parallel
+├─ ...
+└─ Part 100 (5 MB) → Upload in parallel
+      ↓
+AWS assembles parts into single object
+```
+
+**Benefits:**
+- ✅ **Parallel uploads** (10x faster)
+- ✅ **Resume failed uploads** (retry only failed parts)
+- ✅ **Improved throughput** (utilize full network bandwidth)
+
+**Implementation:**
+
+```python
+import boto3
+from boto3.s3.transfer import TransferConfig
+
+s3 = boto3.client('s3')
+
+# Configure multipart upload (5 MB parts)
+config = TransferConfig(
+    multipart_threshold=5 * 1024 * 1024,  # 5 MB
+    max_concurrency=10,                    # 10 parallel uploads
+    multipart_chunksize=5 * 1024 * 1024,   # 5 MB parts
+    use_threads=True
+)
+
+# Upload large file
+s3.upload_file(
+    Filename='/data/logs/app-2024-06-22.log',
+    Bucket='my-datalake',
+    Key='raw/logs/app-2024-06-22.log',
+    Config=config
+)
+```
+
+**AWS CLI:**
+
+```bash
+# Multipart upload (automatic for files > 8 MB)
+aws s3 cp /data/logs/app-2024-06-22.log s3://my-datalake/raw/logs/ \
+  --storage-class STANDARD \
+  --metadata "source=on-prem,date=2024-06-22"
+
+# Monitor multipart uploads
+aws s3api list-multipart-uploads --bucket my-datalake
+
+# Cleanup incomplete multipart uploads (saves storage)
+aws s3api abort-multipart-upload \
+  --bucket my-datalake \
+  --key raw/logs/app-2024-06-22.log \
+  --upload-id <upload-id>
+```
+
+---
+
+**Option 2: S3 Transfer Acceleration (For Geographic Distance)**
+
+**How it works:**
+```
+On-premises (Asia) → CloudFront Edge (Asia) → AWS Backbone → S3 (us-east-1)
+                     (Fast upload)              (Fast transfer)
+```
+
+**Benefits:**
+- ✅ **50-500% faster** for long-distance uploads
+- ✅ **Uses AWS global network** (bypasses public internet)
+- ✅ **No client-side changes** (just change endpoint)
+
+**Setup:**
+
+```bash
+# Enable Transfer Acceleration
+aws s3api put-bucket-accelerate-configuration \
+  --bucket my-datalake \
+  --accelerate-configuration Status=Enabled
+
+# Upload using accelerated endpoint
+aws s3 cp /data/logs/app-2024-06-22.log \
+  s3://my-datalake/raw/logs/ \
+  --endpoint-url https://my-datalake.s3-accelerate.amazonaws.com
+```
+
+**Speed Test:**
+
+```bash
+# Test standard upload vs accelerated
+aws s3 cp test-file.dat s3://my-datalake/ --region us-east-1
+# Standard: 2 MB/s (slow from Asia)
+
+aws s3 cp test-file.dat s3://my-datalake/ \
+  --endpoint-url https://my-datalake.s3-accelerate.amazonaws.com
+# Accelerated: 15 MB/s (7.5x faster!)
+```
+
+---
+
+**Combined Solution: Multipart + Transfer Acceleration**
+
+```python
+import boto3
+from boto3.s3.transfer import TransferConfig
+
+# Use Transfer Acceleration endpoint
+s3 = boto3.client(
+    's3',
+    endpoint_url='https://my-datalake.s3-accelerate.amazonaws.com'
+)
+
+# Multipart upload with acceleration
+config = TransferConfig(
+    multipart_threshold=5 * 1024 * 1024,
+    max_concurrency=10,
+    multipart_chunksize=5 * 1024 * 1024
+)
+
+# Upload
+s3.upload_file(
+    Filename='/data/logs/large-file.log',
+    Bucket='my-datalake',
+    Key='raw/logs/large-file.log',
+    Config=config
+)
+```
+
+**Results:**
+
+| Method | Upload Time (5 TB) | Cost | Reliability |
+|--------|-------------------|------|-------------|
+| Standard PUT | 12 hours | $0 | Low (fails often) |
+| Multipart Upload | 2 hours | $0 | High (resume on failure) |
+| Transfer Acceleration | 4 hours | $200 (data transfer) | Medium |
+| **Multipart + Acceleration** | **1.5 hours** | **$200** | **High** |
+
+**Recommendation:**
+- **Local upload**: Multipart Upload (no extra cost)
+- **Cross-continent upload**: Multipart + Transfer Acceleration (6x faster)
+
+---
