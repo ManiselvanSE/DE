@@ -2776,10 +2776,560 @@ if task.get('ReplicationTaskStats', {}).get('ElapsedTimeMillis', 0) > 10000:
 
 ---
 
-This completes the intermediate interview questions. Due to token limits, should I:
-1. Continue with remaining sections in this response (Certification Tips, Best Practices, Challenges, Resume Project, Cleanup)
-2. Or summarize the final sections more concisely to complete MODULE 3?
+### Scenario-Based Questions (10)
 
+#### **Q11: Oracle to Aurora PostgreSQL - Zero Downtime Migration**
+
+**Scenario**: Your company runs a 5TB Oracle RAC database (Oracle 19c) supporting a mission-critical e-commerce platform with 50,000 transactions per hour. You need to migrate to Aurora PostgreSQL to reduce database costs by 90% while maintaining zero downtime (max 5 minutes cutover window). The Oracle database has:
+- **Data volume**: 5TB (customers, orders, products, inventory)
+- **Throughput**: 50,000 TPS (peak), 15,000 TPS (average)
+- **Availability SLA**: 99.95% (max 22 minutes downtime/month)
+- **Current cost**: $800,000/year (Oracle licenses + infrastructure)
+- **Target cost**: $80,000/year (Aurora Reserved Instances)
+
+**Solution:**
+
+**Phase 1: Assessment using AWS Schema Conversion Tool (SCT)**
+
+```bash
+# SCT Assessment Report
+Total Objects: 930
+├─ Automatically Converted: 790 (85%)
+├─ Requires Manual Action: 93 (10%)
+└─ Incompatible: 47 (5%)
+
+# Key incompatibilities:
+# 1. Oracle DBLINK → PostgreSQL foreign data wrapper (manual)
+# 2. Oracle Advanced Queuing → Amazon SQS (architecture change)
+# 3. Oracle Flashback → Aurora Backtrack (equivalent feature)
+```
+
+**Phase 2: Create Aurora PostgreSQL Cluster**
+
+```bash
+aws rds create-db-cluster \
+  --db-cluster-identifier prod-aurora-cluster \
+  --engine aurora-postgresql \
+  --engine-version 15.4 \
+  --master-username postgres \
+  --master-user-password 'SecurePassword123!' \
+  --database-name ecommerce \
+  --storage-encrypted \
+  --kms-key-id alias/aurora-production \
+  --enable-iam-database-authentication \
+  --backup-retention-period 35 \
+  --deletion-protection
+
+# Create writer + 2 readers
+aws rds create-db-instance \
+  --db-instance-identifier prod-aurora-writer \
+  --db-instance-class db.r6g.4xlarge \
+  --engine aurora-postgresql \
+  --db-cluster-identifier prod-aurora-cluster
+
+# Cost: $3,032/month vs Oracle $800K/year = 95% savings
+```
+
+**Phase 3: DMS Full Load + CDC (Zero Downtime)**
+
+```bash
+# Create DMS replication instance
+aws dms create-replication-instance \
+  --replication-instance-identifier oracle-to-aurora-dms \
+  --replication-instance-class dms.r5.4xlarge \
+  --allocated-storage 1000 \
+  --multi-az
+
+# Create migration task (full load + CDC)
+aws dms create-replication-task \
+  --replication-task-identifier oracle-aurora-migration \
+  --source-endpoint-arn arn:aws:dms:...:endpoint/oracle-source \
+  --target-endpoint-arn arn:aws:dms:...:endpoint/aurora-target \
+  --replication-instance-arn arn:aws:dms:...:rep-instance/oracle-to-aurora-dms \
+  --migration-type full-load-and-cdc \
+  --table-mappings file://table-mappings.json
+
+# Timeline:
+# Day 1-7: Full load (5TB)
+# Day 8+: CDC (replication lag < 1 second)
+```
+
+**Phase 4: Cutover (5 Minutes Downtime)**
+
+```python
+# Automated cutover script
+def execute_cutover():
+    # T-5:00 - Set Oracle read-only
+    oracle_conn.execute("ALTER SYSTEM SET READ_ONLY = TRUE")
+    
+    # T-4:00 - Wait for DMS lag to reach 0
+    wait_for_replication_lag(threshold_ms=1000)
+    
+    # T-3:00 - Stop DMS task
+    dms.stop_replication_task()
+    
+    # T-2:00 - Final validation (row counts match)
+    validate_data_integrity()
+    
+    # T-1:00 - Update Route53 DNS to Aurora
+    route53.update_dns('database.company.com', aurora_endpoint)
+    
+    # T-0:00 - Resume writes to Aurora
+    print("CUTOVER COMPLETE!")
+```
+
+**Results:**
+
+| Metric | Oracle RAC | Aurora PostgreSQL | Improvement |
+|--------|------------|-------------------|-------------|
+| **Cost** | $800,000/year | $36,384/year | **95% reduction** |
+| **Availability** | 99.5% | 99.95% | **+0.45%** |
+| **Failover Time** | 15-30 min | 30-120 sec | **93% faster** |
+| **Migration Downtime** | N/A | 5 minutes | **RTO: 5 min, RPO: 0** |
+
+---
+
+#### **Q12: Redshift Performance Crisis - Query Optimization**
+
+**Scenario**: Your Redshift data warehouse query runtime increased from 30 minutes to 3+ hours. A critical daily ETL job is now missing SLA deadlines. Symptoms: high disk spill (120GB), uneven node utilization (90%/40%/35%/30%), excessive network transfer (200GB).
+
+**Current Problem:**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Node 1 (90% full)    Node 2 (40%)    Node 3 (35%)   Node 4│
+│ ├─ fact_sales (500GB)                                     │
+│ │  DISTKEY: NONE ❌                                        │
+│ │  SORTKEY: NONE ❌                                        │
+│ │  Problem: Uneven distribution, no sort keys             │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Solution:**
+
+**Step 1: Analyze Current Distribution**
+
+```sql
+-- Check data distribution
+SELECT slice, COUNT(*) AS num_rows, SUM(size) AS size_mb
+FROM stv_blocklist
+WHERE name = 'fact_sales'
+GROUP BY slice;
+
+-- Result: 90% data on node 1 (uneven!) ❌
+
+-- Check disk spill
+SELECT query, SUM(bytes)/1024/1024/1024 AS spill_gb
+FROM svl_query_summary
+WHERE is_diskbased = 't'
+GROUP BY query;
+
+-- Result: 120GB disk spill ❌
+```
+
+**Step 2: Redesign Schema with Proper Keys**
+
+```sql
+-- BEFORE (broken)
+CREATE TABLE fact_sales (
+    sale_id BIGINT,
+    customer_id BIGINT,
+    sale_date DATE,
+    sale_amount DECIMAL(10,2)
+);  -- No DISTKEY, no SORTKEY
+
+-- AFTER (optimized)
+CREATE TABLE fact_sales_new (
+    sale_id BIGINT,
+    customer_id BIGINT DISTKEY,      -- JOIN key
+    sale_date DATE SORTKEY,           -- WHERE clause filter
+    sale_amount DECIMAL(10,2)
+) DISTSTYLE KEY;
+
+-- Small dimensions: replicate to all nodes
+CREATE TABLE dim_customers_new (
+    customer_id BIGINT PRIMARY KEY,
+    customer_name VARCHAR(100)
+) DISTSTYLE ALL;  -- < 100MB, replicate
+```
+
+**Step 3: Create Materialized View**
+
+```sql
+-- Pre-aggregate common queries
+CREATE MATERIALIZED VIEW mv_monthly_sales AS
+SELECT 
+    DATE_TRUNC('month', s.sale_date) AS sale_month,
+    c.customer_segment,
+    SUM(s.sale_amount) AS total_revenue
+FROM fact_sales_new s
+JOIN dim_customers_new c ON s.customer_id = c.customer_id
+WHERE s.sale_date >= DATEADD(month, -24, CURRENT_DATE)
+GROUP BY 1, 2;
+
+-- Query now uses MV (instant results)
+SELECT * FROM mv_monthly_sales WHERE sale_month >= '2024-01-01';
+-- Runtime: 0.8 seconds (was 3 hours) = 15,000x faster! ✓
+```
+
+**Results:**
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| **Query Runtime** | 3 hr 20 min | 28 seconds | **428x faster** |
+| **Disk Spill** | 120GB | 0GB | **100% reduction** |
+| **Network Transfer** | 200GB | 2GB | **99% reduction** |
+| **Node Utilization** | 90%/40%/35%/30% | 75%/75%/75%/75% | **Even** |
+
+**Techniques Applied:**
+1. **DISTKEY:** customer_id (most frequent JOIN column)
+2. **SORTKEY:** sale_date (most common WHERE clause)
+3. **DISTSTYLE ALL:** Small dimensions replicated to all nodes
+4. **Materialized View:** Pre-aggregated common queries
+
+---
+
+#### **Q13: Aurora Global Database - Disaster Recovery Failover**
+
+**Scenario**: You need disaster recovery for Aurora PostgreSQL with RTO < 1 minute and RPO < 1 minute. Primary region (us-east-1), secondary region (eu-west-1). Automated failover required for regional outages.
+
+**Architecture:**
+
+```
+Primary Region: us-east-1
+┌──────────────────────────────────────────────────┐
+│  Aurora Writer (db.r6g.2xlarge)                  │
+│  ├─ Handles all writes (10,000 TPS)              │
+│  ├─ 2 Read Replicas (Multi-AZ)                   │
+│  └─ Replicates to eu-west-1 (lag: 100-300ms)     │
+└──────────────────────────────────────────────────┘
+                    │
+                    │ Aurora Global Database
+                    ↓
+Secondary Region: eu-west-1 (DR)
+┌──────────────────────────────────────────────────┐
+│  Aurora Read Replica (db.r6g.xlarge)             │
+│  ├─ Read-only until promoted                     │
+│  ├─ Replication lag: 100-300ms                   │
+│  └─ Promotes to primary on failover              │
+└──────────────────────────────────────────────────┘
+```
+
+**Implementation:**
+
+**Step 1: Create Aurora Global Database**
+
+```bash
+# Create primary cluster (us-east-1)
+aws rds create-global-cluster \
+  --global-cluster-identifier prod-global-cluster \
+  --source-db-cluster-identifier arn:aws:rds:us-east-1:...:cluster:prod-global-primary
+
+# Add secondary region (eu-west-1)
+aws rds create-db-cluster \
+  --db-cluster-identifier prod-global-secondary \
+  --engine aurora-postgresql \
+  --global-cluster-identifier prod-global-cluster \
+  --region eu-west-1
+
+# Create DR read replica
+aws rds create-db-instance \
+  --db-instance-identifier prod-global-dr-reader \
+  --db-instance-class db.r6g.xlarge \
+  --engine aurora-postgresql \
+  --db-cluster-identifier prod-global-secondary \
+  --region eu-west-1
+```
+
+**Step 2: Setup Route 53 Failover**
+
+```bash
+# Primary record (us-east-1)
+aws route53 change-resource-record-sets \
+  --hosted-zone-id Z123456 \
+  --change-batch '{
+    "Changes": [{
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "database.myapp.com",
+        "Type": "CNAME",
+        "Failover": "PRIMARY",
+        "HealthCheckId": "health-check-id",
+        "TTL": 60,
+        "ResourceRecords": [{"Value": "prod-global-primary.us-east-1.rds.amazonaws.com"}]
+      }
+    }]
+  }'
+
+# Secondary record (eu-west-1)
+aws route53 change-resource-record-sets \
+  --hosted-zone-id Z123456 \
+  --change-batch '{
+    "Changes": [{
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "database.myapp.com",
+        "Type": "CNAME",
+        "Failover": "SECONDARY",
+        "TTL": 60,
+        "ResourceRecords": [{"Value": "prod-global-secondary.eu-west-1.rds.amazonaws.com"}]
+      }
+    }]
+  }'
+```
+
+**Step 3: Automated Failover Lambda**
+
+```python
+# lambda_failover.py
+import boto3
+
+def lambda_handler(event, context):
+    rds = boto3.client('rds', region_name='eu-west-1')
+    
+    # Detach secondary from global cluster
+    rds.remove_from_global_cluster(
+        GlobalClusterIdentifier='prod-global-cluster',
+        DbClusterIdentifier='arn:aws:rds:eu-west-1:...:cluster:prod-global-secondary'
+    )
+    
+    # Secondary is now standalone (accepts writes)
+    return {'statusCode': 200, 'body': 'Failover complete'}
+```
+
+**Results:**
+
+| Metric | Target | Actual |
+|--------|--------|--------|
+| **RTO** | < 1 minute | 90 seconds |
+| **RPO** | < 1 minute | 300ms |
+| **Replication Lag** | < 1 second | 100-300ms |
+| **Availability** | 99.99% | 99.99% |
+
+**Cost:** $1,605/month (primary + secondary + Route 53)
+
+---
+
+#### **Q14: DynamoDB Capacity Planning - Black Friday Traffic Spike**
+
+**Scenario**: Your e-commerce platform uses DynamoDB for shopping cart sessions. Normal traffic: 5,000 writes/sec, 15,000 reads/sec. Black Friday spike: 50x increase (250,000 writes/sec, 750,000 reads/sec) for 48 hours. Plan capacity with zero throttling.
+
+**Options:**
+
+**Option 1: Provisioned Capacity**
+- WCU: 250,000 x $0.00065/hour x 48h = $7,800
+- RCU: 750,000 x $0.00013/hour x 48h = $4,680
+- **Total: $12,480**
+- **Problems:** Manual scaling, risk of throttling
+
+**Option 2: On-Demand Capacity**
+- Writes: 43.2B x $1.25/million = $54,000
+- Reads: 129.6B x $0.25/million = $32,400
+- **Total: $86,400**
+- **Benefit:** Auto-scaling, no throttling
+
+**Option 3: Hybrid (DAX + On-Demand) - RECOMMENDED**
+
+```
+Architecture:
+Application → DAX (90% cache hit) → DynamoDB
+                ↓                      ↓
+          675K reads/sec         75K reads/sec
+          (cache hits)           (cache misses)
+                              250K writes/sec
+```
+
+**Implementation:**
+
+```bash
+# Create DAX cluster (3 nodes)
+aws dax create-cluster \
+  --cluster-name shopping-cart-dax \
+  --node-type dax.r5.large \
+  --replication-factor 3
+
+# Switch table to on-demand
+aws dynamodb update-table \
+  --table-name shopping-cart-sessions \
+  --billing-mode PAY_PER_REQUEST
+```
+
+**Cost Calculation:**
+
+```
+DynamoDB On-Demand:
+├─ Writes: 43.2B x $1.25/million = $54,000
+├─ Reads (10% only): 12.96B x $0.25/million = $3,240
+└─ Subtotal: $57,240
+
+DAX (3 nodes x $0.228/hour x 48h):
+└─ Subtotal: $32.83
+
+Total: $57,273 (vs $86,400 on-demand only)
+Savings: $29,127 (34% reduction) ✓
+```
+
+**Results:**
+
+| Approach | Cost (48h) | Savings | Latency |
+|----------|------------|---------|---------|
+| Provisioned | $12,480 | - | 15ms |
+| On-Demand | $86,400 | - | 15ms |
+| **Hybrid (DAX)** | **$57,273** | **34%** | **2ms** |
+
+---
+
+#### **Q15: Multi-Tenant SaaS Database Security**
+
+**Scenario**: Build secure multi-tenant SaaS platform with 500 enterprise customers. Requirements: data isolation, per-tenant encryption, audit logging (SOC 2, GDPR), row-level security. Budget: < $10,000/month.
+
+**Architecture Options:**
+
+**Option 1: Database per Tenant**
+- Cost: $300/cluster x 500 = $150,000/month ❌ (too expensive)
+
+**Option 2: Shared DB + Schema Isolation (RECOMMENDED)**
+- Cost: $1,265/month ✅
+
+**Implementation:**
+
+**Step 1: Create Aurora Cluster with Encryption**
+
+```bash
+# Create KMS key
+aws kms create-key --description "Aurora multi-tenant encryption"
+aws kms create-alias --alias-name alias/aurora-multitenant --target-key-id <key-id>
+
+# Create Aurora cluster
+aws rds create-db-cluster \
+  --db-cluster-identifier saas-multitenant-cluster \
+  --engine aurora-postgresql \
+  --storage-encrypted \
+  --kms-key-id alias/aurora-multitenant \
+  --enable-iam-database-authentication \
+  --enable-cloudwatch-logs-exports '["postgresql"]'
+
+# Create instances (1 writer + 2 readers)
+# Cost: $1,265/month
+```
+
+**Step 2: Create Schema-Based Tenant Isolation**
+
+```sql
+-- Create schema per tenant
+CREATE SCHEMA tenant_acme_corp;
+CREATE SCHEMA tenant_globex_inc;
+-- ... repeat for all 500 tenants
+
+-- Create dedicated user per tenant
+CREATE USER tenant_acme_corp_user WITH PASSWORD 'SecurePass123!';
+
+-- Grant access ONLY to their schema
+GRANT USAGE ON SCHEMA tenant_acme_corp TO tenant_acme_corp_user;
+GRANT ALL ON ALL TABLES IN SCHEMA tenant_acme_corp TO tenant_acme_corp_user;
+
+-- Revoke access to other schemas
+REVOKE ALL ON SCHEMA tenant_globex_inc FROM tenant_acme_corp_user;
+REVOKE ALL ON SCHEMA public FROM tenant_acme_corp_user;
+
+-- Verify isolation
+SET ROLE tenant_acme_corp_user;
+SELECT * FROM tenant_globex_inc.users;
+-- ERROR: permission denied ✓
+```
+
+**Step 3: Enable Row-Level Security (Defense in Depth)**
+
+```sql
+-- Create table with RLS
+CREATE TABLE tenant_acme_corp.users (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL DEFAULT 'acme-corp',
+    email VARCHAR(255),
+    CONSTRAINT chk_tenant_id CHECK (tenant_id = 'acme-corp')
+);
+
+-- Enable RLS
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Create RLS policy
+CREATE POLICY tenant_isolation_policy ON users
+    USING (tenant_id = current_setting('app.tenant_id', TRUE));
+
+-- Application sets tenant_id before queries
+SET app.tenant_id = 'acme-corp';
+
+-- All queries automatically filtered by RLS
+SELECT * FROM users;  -- Returns only acme-corp data ✓
+```
+
+**Step 4: Enable Audit Logging (GDPR Compliance)**
+
+```sql
+-- Install pgaudit extension
+CREATE EXTENSION pgaudit;
+
+-- Configure audit logging
+ALTER SYSTEM SET pgaudit.log = 'READ, WRITE, DDL';
+ALTER SYSTEM SET log_connections = ON;
+ALTER SYSTEM SET log_statement = 'all';
+SELECT pg_reload_conf();
+
+-- Audit logs sent to CloudWatch Logs
+-- Example: "AUDIT: SELECT * FROM users WHERE email = 'john@acme.com'"
+```
+
+**Step 5: IAM Database Authentication (No Passwords)**
+
+```python
+# Connect using IAM token (no static passwords)
+import boto3
+import psycopg2
+
+def get_iam_auth_token(rds_host, port, db_user, region):
+    rds = boto3.client('rds', region_name=region)
+    return rds.generate_db_auth_token(
+        DBHostname=rds_host, Port=port, DBUsername=db_user, Region=region
+    )
+
+# Get 15-minute token
+auth_token = get_iam_auth_token('cluster.rds.amazonaws.com', 5432, 'tenant_acme_corp_user', 'us-east-1')
+
+# Connect
+conn = psycopg2.connect(
+    host='cluster.rds.amazonaws.com',
+    user='tenant_acme_corp_user',
+    password=auth_token,  # Temporary token!
+    sslmode='require'
+)
+
+# Set tenant context
+conn.cursor().execute("SET app.tenant_id = 'acme-corp'")
+```
+
+**Security Layers:**
+
+| Layer | Implementation | Status |
+|-------|----------------|--------|
+| 1. Network | Private subnet, no public IP | ✅ |
+| 2. Encryption at Rest | KMS | ✅ |
+| 3. Encryption in Transit | SSL/TLS | ✅ |
+| 4. Schema Isolation | Dedicated schemas | ✅ |
+| 5. Row-Level Security | PostgreSQL RLS | ✅ |
+| 6. IAM Authentication | Token-based, no passwords | ✅ |
+| 7. Audit Logging | pgaudit + CloudTrail | ✅ |
+
+**Results:**
+
+| Metric | Value |
+|--------|-------|
+| **Cost** | $1,368/month (vs $150K for 500 clusters) |
+| **Savings** | 99% cost reduction |
+| **Tenants Supported** | 500 schemas |
+| **Compliance** | GDPR, SOC 2, HIPAA ✅ |
+| **Security Layers** | 7 layers of defense |
+
+---
 
 #### **Q16: Database Performance Monitoring - Identifying and Resolving Slow Queries**
 
